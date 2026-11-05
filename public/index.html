@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101722">
+  <meta name="description" content="منصة Archai لإدارة البراندات والفروع وتسجيل العملاء عبر QR وNFC">
+  <meta name="color-scheme" content="dark">
+  <script>
+    // Remove the legacy same-origin sw.js worker shipped by older builds.
+    // This app does not use a service worker; stale workers can serve broken cached responses.
+    (() => {
+      if (!('serviceWorker' in navigator)) return;
+      const cleanupKey = 'archai-legacy-sw-cleaned-v60';
+      navigator.serviceWorker.getRegistrations().then(async (registrations) => {
+        const legacy = registrations.filter((registration) =>
+          [registration.active, registration.waiting, registration.installing].some((worker) => {
+            if (!worker) return false;
+            try {
+              const url = new URL(worker.scriptURL);
+              return url.origin === location.origin && /\/sw\.js$/i.test(url.pathname);
+            } catch { return false; }
+          })
+        );
+        if (!legacy.length) return;
+        await Promise.all(legacy.map((registration) => registration.unregister()));
+        if (navigator.serviceWorker.controller && !sessionStorage.getItem(cleanupKey)) {
+          sessionStorage.setItem(cleanupKey, '1');
+          location.reload();
+        }
+      }).catch(() => {});
+    })();
+  </script>
+  <title>Archai Branch | إدارة الفروع والعملاء</title>
+  <link rel="icon" href="assets/logo.webp">
+  <link rel="stylesheet" href="css/app.css?v=6.5">
+</head>
+<body>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <section id="authView" class="auth-shell">
+    <div class="auth-card">
+      <img src="assets/logo.webp" class="brand-logo" alt="شعار Archai">
+      <span class="eyebrow">BRANCH MANAGEMENT PLATFORM</span>
+      <h1>مرحباً بعودتك</h1>
+      <p>سجّل الدخول لإدارة البراندات والفروع والعملاء.</p>
+      <form id="loginForm">
+        <label for="email">البريد الإلكتروني
+          <input id="email" name="email" type="email" required autocomplete="username" placeholder="name@company.com" inputmode="email">
+        </label>
+        <label for="password">كلمة المرور
+          <input id="password" name="password" type="password" required autocomplete="current-password" placeholder="••••••••">
+        </label>
+        <button class="btn primary full" type="submit">تسجيل الدخول</button>
+      </form>
+      <small>الوصول مخصص لحسابات الإدارة المعتمدة فقط.</small>
+    </div>
+  </section>
+
+  <div id="appView" class="app hidden">
+    <aside class="sidebar">
+      <div class="side-brand">
+        <img src="assets/logo.webp" alt="">
+        <div><b>ARCHAI</b><small>BRANCH SYSTEM</small></div>
+      </div>
+      <div class="profile">
+        <div class="avatar" id="avatar">A</div>
+        <div class="profile-copy"><b id="profileName">Administrator</b><small id="profileRole">مدير النظام</small></div>
+      </div>
+      <nav id="mainNav" aria-label="القائمة الرئيسية">
+        <button class="nav-item active" type="button" data-page="overview"><span class="nav-icon">▦</span><span>نظرة عامة</span></button>
+        <button class="nav-item" type="button" data-page="brands"><span class="nav-icon">◇</span><span>البراندات</span></button>
+        <button class="nav-item" type="button" data-page="branches"><span class="nav-icon">⌖</span><span>الفروع و QR / NFC</span></button>
+        <button class="nav-item" type="button" data-page="customers"><span class="nav-icon">♙</span><span>العملاء</span></button>
+        <button class="nav-item" type="button" data-page="fields"><span class="nav-icon">☷</span><span>حقول التسجيل</span></button>
+      </nav>
+      <div class="side-bottom">
+        <div class="secure-note"><i></i> اتصال آمن بقاعدة البيانات</div>
+        <button id="logoutBtn" class="logout" type="button">↪ تسجيل الخروج</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div><span class="eyebrow">WORKSPACE / <span id="crumb">OVERVIEW</span></span><h2 id="pageTitle">نظرة عامة</h2></div>
+        <div class="top-actions"><span class="live-pill"><i></i> متصل</span><button id="refreshBtn" class="icon-btn" type="button" title="تحديث" aria-label="تحديث البيانات">↻</button></div>
+      </header>
+      <div id="localUrlWarning" class="warning-banner hidden" role="alert">
+        أنت تعمل على عنوان محلي. أي روابط QR/NFC جديدة ستشير إلى هذا الكمبيوتر فقط؛ لا تطبعها ولا تستخدمها للعملاء الحقيقيين قبل ضبط رابط HTTPS النهائي وفتح لوحة الإدارة من الدومين المنشور.
+      </div>
+
+      <section id="page-overview" class="page">
+        <div class="welcome-banner">
+          <div><span class="eyebrow">CONTROL CENTER</span><h2>إدارة أذكى، وتجربة أبسط.</h2><p>تابع البراندات والفروع وسجلات العملاء من مكان واحد.</p></div>
+          <div class="banner-mark" aria-hidden="true">A.</div>
+        </div>
+        <div class="stats-grid">
+          <article class="stat-card"><span>إجمالي البراندات</span><b id="statBrands">—</b><small>البراندات المسجلة</small></article>
+          <article class="stat-card"><span>الفروع النشطة</span><b id="statBranches">—</b><small>نقاط استقبال العملاء</small></article>
+          <article class="stat-card"><span>إجمالي العملاء</span><b id="statCustomers">—</b><small>كل سجلات العملاء</small></article>
+          <article class="stat-card"><span>تسجيلات اليوم</span><b id="statToday">—</b><small>ضمن السجلات المحمّلة</small></article>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><div><h3>آخر تسجيلات العملاء</h3><p>أحدث العملاء المسجلين عبر QR وNFC</p></div><button class="btn subtle" type="button" data-goto="customers">عرض الكل ←</button></div>
+          <div id="recentCustomers" class="table-wrap"><div class="empty">جاري تحميل البيانات...</div></div>
+        </div>
+      </section>
+
+      <section id="page-brands" class="page hidden">
+        <div class="section-head"><div><h3>البراندات</h3><p>عرض تفاصيل كل براند، الفروع، العملاء، وحقول التسجيل وإدارتها.</p></div><button id="addBrandBtn" class="btn primary" type="button">＋ إضافة براند</button></div>
+        <div id="brandsList" class="panel table-wrap"></div>
+      </section>
+
+      <section id="page-branches" class="page hidden">
+        <div class="section-head"><div><h3>الفروع وروابط التسجيل</h3><p>أضف اسم الفرع فقط، وتابع عدد العملاء المسجلين في كل فرع.</p></div><button id="addBranchBtn" class="btn primary" type="button">＋ إضافة فرع</button></div>
+        <div id="branchFilters" class="filters panel branch-filters">
+          <label class="branch-filter-label" for="branchBrandFilter">عرض فروع البراند:</label>
+          <select id="branchBrandFilter" aria-label="تصفية الفروع حسب البراند"><option value="">كل البراندات</option></select>
+          <span id="branchFilterSummary" class="muted">عرض فروع كل البراندات</span>
+        </div>
+        <div id="branchesList" class="cards-grid"></div>
+      </section>
+
+      <section id="page-customers" class="page hidden">
+        <div class="section-head"><div><h3>قاعدة بيانات العملاء</h3><p>كل السجلات مرتبة بالأحدث، مع البحث والتصفية والتصدير إلى Excel.</p></div><button id="exportBtn" class="btn primary" type="button">⇩ تصدير Excel</button></div>
+        <div class="filters panel">
+          <input id="customerSearch" type="search" placeholder="ابحث بالاسم أو الهاتف أو المنتج..." aria-label="البحث في العملاء">
+          <select id="brandFilter" aria-label="تصفية حسب البراند"><option value="">كل البراندات</option></select>
+          <select id="branchFilter" aria-label="تصفية حسب الفرع"><option value="">كل الفروع</option></select>
+        </div>
+        <p class="list-hint">سجلات العملاء المصرح بها، مرتبة من الأحدث إلى الأقدم. استخدم البحث والفلاتر للوصول السريع إلى البيانات.</p>
+        <div id="customersList" class="panel table-wrap"></div>
+      </section>
+
+      <section id="page-fields" class="page hidden">
+        <div class="section-head"><div><h3>حقول نموذج العميل</h3><p>مدير النظام يفتح صلاحية التعديل، وتُغلق تلقائياً بعد الحفظ.</p></div><span id="editPermission" class="status-pill">التحرير مغلق</span></div>
+        <div class="panel permission-panel">
+          <div><b>صلاحية تعديل الحقول</b><p>يفتح مدير النظام التعديل لبراند محدد. تنتهي الصلاحية بعد 30 دقيقة أو تُغلق بعد الحفظ.</p></div>
+          <div class="inline-controls"><select id="fieldsBrandSelect" aria-label="اختر البراند"><option value="">اختر البراند</option></select><button id="unlockFieldsBtn" class="btn secondary" type="button">تعديل الحقول</button><button id="grantFieldsAccessBtn" class="btn subtle hidden" type="button">فتح التعديل لمدير البراند</button></div>
+        </div>
+        <div id="fieldsPreview" class="panel field-preview-panel">
+          <div class="panel-head"><div><h3>الحقول الحالية</h3><p id="fieldsPreviewHint">اختر البراند لعرض حقول نموذج التسجيل.</p></div></div>
+          <div id="fieldsPreviewRows" class="field-preview-grid"><div class="empty">اختر براندًا لعرض الحقول الحالية.</div></div>
+        </div>
+        <div id="fieldsEditor" class="panel hidden">
+          <div class="panel-head"><div><h3>حقول النموذج</h3><p>الاسم ورقم الهاتف حقول أساسية ولا يمكن حذفهما.</p></div><button id="addFieldBtn" class="btn subtle" type="button">＋ حقل جديد</button></div>
+          <div id="fieldsRows"></div>
+          <div class="panel-foot"><span class="muted">الحد الأقصى 15 حقلاً شاملاً الاسم والهاتف.</span><button id="saveFieldsBtn" class="btn primary" type="button">حفظ وإغلاق</button></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="modalRoot"></div>
+  <script type="module" src="js/app.js?v=6.5"></script>
+</body>
+</html>

@@ -1,0 +1,146 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function userPath() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function hasUser() { return signedIn() && exists(userPath()); }
+    function userData() { return get(userPath()).data; }
+    function activeUser() { return hasUser() && userData().active == true; }
+    function superAdmin() { return activeUser() && userData().role == 'super_admin'; }
+    function brandIsActive(brandId) {
+      return exists(/databases/$(database)/documents/brands/$(brandId))
+        && get(/databases/$(database)/documents/brands/$(brandId)).data.active == true;
+    }
+    function brandAdmin(brandId) {
+      return activeUser() && userData().role == 'brand_admin'
+        && userData().brandId == brandId && brandIsActive(brandId);
+    }
+    function branchExistsFor(brandId, branchId) {
+      return existsAfter(/databases/$(database)/documents/branches/$(branchId))
+        && getAfter(/databases/$(database)/documents/branches/$(branchId)).data.brandId == brandId;
+    }
+
+    match /users/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || superAdmin());
+      allow list: if superAdmin();
+      allow create, update, delete: if superAdmin();
+    }
+
+    match /brands/{brandId} {
+      allow get, list: if superAdmin() || brandAdmin(brandId);
+      allow create, delete: if superAdmin();
+      allow update: if superAdmin() || (
+        brandAdmin(brandId)
+        && resource.data.editAccess == true
+        && resource.data.editAccessUntil > request.time
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['fields', 'editAccess', 'editAccessUntil', 'updatedAt'])
+        && request.resource.data.fields is list
+        && request.resource.data.fields.size() >= 2
+        && request.resource.data.fields.size() <= 15
+        && request.resource.data.editAccess == false
+        && request.resource.data.editAccessUntil == null
+      );
+    }
+
+    match /branches/{branchId} {
+      allow get, list: if superAdmin() || brandAdmin(resource.data.brandId);
+      allow create: if superAdmin() || (
+        brandAdmin(request.resource.data.brandId)
+        && request.resource.data.active == true
+        && request.resource.data.keys().hasAll(['name','brandId','brandName','qrToken','nfcToken','qrUrl','nfcUrl','active'])
+        && request.resource.data.keys().hasOnly(['name','brandId','brandName','active','qrToken','nfcToken','qrUrl','nfcUrl','createdAt','updatedAt'])
+        && request.resource.data.qrToken != request.resource.data.nfcToken
+      );
+      allow update: if superAdmin() || (
+        brandAdmin(resource.data.brandId)
+        && request.resource.data.brandId == resource.data.brandId
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['active','updatedAt'])
+      );
+      allow delete: if superAdmin() || brandAdmin(resource.data.brandId);
+    }
+
+    // Public scan page can fetch a token only when it already knows its random ID.
+    // Listing the token collection is forbidden to prevent token enumeration.
+    match /branchTokens/{token} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if superAdmin() || (
+        brandAdmin(request.resource.data.brandId)
+        && request.resource.data.active == true
+        && request.resource.data.source in ['qr','nfc']
+        && request.resource.data.keys().hasOnly(['branchId','brandId','brandName','brandImage','branchName','fields','active','createdAt','source'])
+        && (!('brandImage' in request.resource.data) || (request.resource.data.brandImage is string && request.resource.data.brandImage.size() <= 200 && (request.resource.data.brandImage == '' || request.resource.data.brandImage.matches('^assets/brands/[A-Za-z0-9][A-Za-z0-9._-]*\\.(svg|png|jpg|jpeg|webp)$'))))
+        && request.resource.data.fields is list
+        && request.resource.data.fields.size() >= 2
+        && request.resource.data.fields.size() <= 15
+        && branchExistsFor(request.resource.data.brandId, request.resource.data.branchId)
+        && ((request.resource.data.source == 'qr'
+              && getAfter(/databases/$(database)/documents/branches/$(request.resource.data.branchId)).data.qrToken == token)
+            || (request.resource.data.source == 'nfc'
+              && getAfter(/databases/$(database)/documents/branches/$(request.resource.data.branchId)).data.nfcToken == token))
+      );
+      allow update: if superAdmin() || (
+        brandAdmin(resource.data.brandId)
+        && request.resource.data.brandId == resource.data.brandId
+        && request.resource.data.branchId == resource.data.branchId
+        && request.resource.data.source == resource.data.source
+        && (
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active'])
+            && request.resource.data.active == (getAfter(/databases/$(database)/documents/branches/$(resource.data.branchId)).data.active == true
+              && getAfter(/databases/$(database)/documents/brands/$(resource.data.brandId)).data.active == true))
+          ||
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fields'])
+            && request.resource.data.fields is list
+            && request.resource.data.fields.size() >= 2
+            && request.resource.data.fields.size() <= 15
+            && get(/databases/$(database)/documents/brands/$(resource.data.brandId)).data.editAccess == true
+            && get(/databases/$(database)/documents/brands/$(resource.data.brandId)).data.editAccessUntil > request.time)
+        )
+      );
+      allow delete: if superAdmin() || brandAdmin(resource.data.brandId);
+    }
+
+    match /customers/{customerId} {
+      allow get, list: if superAdmin() || brandAdmin(resource.data.brandId);
+      allow create: if request.resource.data.keys().hasAll([
+          'name','phone','brandId','branchId','brandName','branchName','source','token','createdAt','customFields','consent','consentVersion','consentAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'name','phone','purchase','customFields','brandId','branchId','brandName','branchName','source','token','createdAt','consent','consentVersion','consentAt'
+        ])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 2
+        && request.resource.data.name.size() <= 100
+        && request.resource.data.phone is string
+        && request.resource.data.phone.size() >= 5
+        && request.resource.data.phone.size() <= 30
+        && (!('purchase' in request.resource.data) || (request.resource.data.purchase is string && request.resource.data.purchase.size() <= 1000))
+        && request.resource.data.consent == true
+        && request.resource.data.consentVersion == '1.0'
+        && request.resource.data.consentAt == request.time
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.brandId is string
+        && request.resource.data.branchId is string
+        && request.resource.data.source in ['qr','nfc']
+        && request.resource.data.customFields is map
+        && request.resource.data.customFields.size() <= 15
+        && exists(/databases/$(database)/documents/branches/$(request.resource.data.branchId))
+        && get(/databases/$(database)/documents/branches/$(request.resource.data.branchId)).data.active == true
+        && get(/databases/$(database)/documents/branches/$(request.resource.data.branchId)).data.brandId == request.resource.data.brandId
+        && get(/databases/$(database)/documents/brands/$(request.resource.data.brandId)).data.active == true
+        && exists(/databases/$(database)/documents/branchTokens/$(request.resource.data.token))
+        && get(/databases/$(database)/documents/branchTokens/$(request.resource.data.token)).data.branchId == request.resource.data.branchId
+        && get(/databases/$(database)/documents/branchTokens/$(request.resource.data.token)).data.brandId == request.resource.data.brandId
+        && get(/databases/$(database)/documents/branchTokens/$(request.resource.data.token)).data.active == true
+        && get(/databases/$(database)/documents/branchTokens/$(request.resource.data.token)).data.source == request.resource.data.source
+        && get(/databases/$(database)/documents/branchTokens/$(request.resource.data.token)).data.brandName == request.resource.data.brandName
+        && get(/databases/$(database)/documents/branchTokens/$(request.resource.data.token)).data.branchName == request.resource.data.branchName
+        && get(/databases/$(database)/documents/branches/$(request.resource.data.branchId)).data.name == request.resource.data.branchName
+        && get(/databases/$(database)/documents/brands/$(request.resource.data.brandId)).data.name == request.resource.data.brandName;
+      allow update: if false;
+      allow delete: if superAdmin() || brandAdmin(resource.data.brandId);
+    }
+  }
+}

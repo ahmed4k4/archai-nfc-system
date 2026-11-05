@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101722">
+  <meta name="description" content="نموذج تسجيل بيانات العميل">
+  <meta name="color-scheme" content="dark">
+  <script>
+    // Remove the legacy same-origin sw.js worker shipped by older builds.
+    // This app does not use a service worker; stale workers can serve broken cached responses.
+    (() => {
+      if (!('serviceWorker' in navigator)) return;
+      const cleanupKey = 'archai-legacy-sw-cleaned-v60';
+      navigator.serviceWorker.getRegistrations().then(async (registrations) => {
+        const legacy = registrations.filter((registration) =>
+          [registration.active, registration.waiting, registration.installing].some((worker) => {
+            if (!worker) return false;
+            try {
+              const url = new URL(worker.scriptURL);
+              return url.origin === location.origin && /\/sw\.js$/i.test(url.pathname);
+            } catch { return false; }
+          })
+        );
+        if (!legacy.length) return;
+        await Promise.all(legacy.map((registration) => registration.unregister()));
+        if (navigator.serviceWorker.controller && !sessionStorage.getItem(cleanupKey)) {
+          sessionStorage.setItem(cleanupKey, '1');
+          location.reload();
+        }
+      }).catch(() => {});
+    })();
+  </script>
+  <title>تسجيل بيانات العميل</title>
+  <link rel="stylesheet" href="css/app.css?v=6.5">
+</head>
+<body class="scan-body">
+  <main class="scan-card">
+    <img id="scanBrandLogo" class="scan-logo" alt="" hidden>
+    <span class="eyebrow">WELCOME</span>
+    <h1>سجّل بياناتك</h1>
+    <p id="scanBranch" class="muted" aria-live="polite">لحظات ويتم تجهيز النموذج...</p>
+    <form id="customerForm">
+      <div id="customerFields"></div>
+      <label class="consent-row"><input id="privacyConsent" type="checkbox" required> أوافق على استخدام بياناتي للتواصل بخصوص زيارتي أو مشترياتي من هذا البراند.</label>
+      <button class="btn primary full" type="submit">إرسال التسجيل</button>
+    </form>
+    <p id="scanMessage" class="scan-message" role="status" aria-live="polite"></p>
+    <small class="muted scan-privacy-note">يتم استخدام بياناتك بواسطة البراند والفرع الموضح أعلاه وفقاً لغرض التواصل المتعلق بزيارتك أو مشترياتك.</small>
+  </main>
+  <script type="module" src="js/scan.js?v=6.3"></script>
+</body>
+</html>

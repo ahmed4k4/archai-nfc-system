@@ -1,0 +1,12 @@
+{
+  "images": [
+    {
+      "name": "الصورة التجريبية الافتراضية",
+      "src": "assets/brands/sample-brand.svg"
+    },
+    {
+      "name": "biggest",
+      "src": "assets/brands/biggest.webp"
+    }
+  ]
+}

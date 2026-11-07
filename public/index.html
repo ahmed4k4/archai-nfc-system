@@ -33,7 +33,7 @@
   </script>
   <title>Archai Branch | إدارة الفروع والعملاء</title>
   <link rel="icon" href="assets/logo.webp">
-  <link rel="stylesheet" href="css/app.css?v=6.5">
+  <link rel="stylesheet" href="css/app.css?v=6.8">
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -123,10 +123,24 @@
 
       <section id="page-customers" class="page hidden">
         <div class="section-head"><div><h3>قاعدة بيانات العملاء</h3><p>كل السجلات مرتبة بالأحدث، مع البحث والتصفية والتصدير إلى Excel.</p></div><button id="exportBtn" class="btn primary" type="button">⇩ تصدير Excel</button></div>
-        <div class="filters panel">
+        <div class="filters panel customer-filters">
           <input id="customerSearch" type="search" placeholder="ابحث بالاسم أو الهاتف أو المنتج..." aria-label="البحث في العملاء">
           <select id="brandFilter" aria-label="تصفية حسب البراند"><option value="">كل البراندات</option></select>
           <select id="branchFilter" aria-label="تصفية حسب الفرع"><option value="">كل الفروع</option></select>
+          <div class="customer-date-filter" role="group" aria-label="تصفية العملاء بالتاريخ">
+            <div class="date-filter-heading">
+              <span class="date-filter-icon" aria-hidden="true">▦</span>
+              <span class="date-filter-heading-copy"><strong>فلترة التاريخ</strong><small id="customerDateFilterState" aria-live="polite">كل التواريخ</small></span>
+            </div>
+            <div class="date-range-fields">
+              <label class="date-input-wrap"><span>من تاريخ</span><input id="customerDateFrom" type="date" aria-label="من تاريخ"></label>
+              <label class="date-input-wrap"><span>إلى تاريخ</span><input id="customerDateTo" type="date" aria-label="إلى تاريخ"></label>
+            </div>
+            <div class="date-filter-actions">
+              <button id="customerTodayBtn" class="date-quick-btn" type="button" title="عرض عملاء اليوم"><span aria-hidden="true">◷</span> اليوم</button>
+              <button id="customerDateClearBtn" class="date-clear-btn" type="button" title="مسح فلتر التاريخ" aria-label="مسح فلتر التاريخ"><span aria-hidden="true">↺</span><span>مسح</span></button>
+            </div>
+          </div>
         </div>
         <p class="list-hint">سجلات العملاء المصرح بها، مرتبة من الأحدث إلى الأقدم. استخدم البحث والفلاتر للوصول السريع إلى البيانات.</p>
         <div id="customersList" class="panel table-wrap"></div>
@@ -152,6 +166,6 @@
   </div>
 
   <div id="modalRoot"></div>
-  <script type="module" src="js/app.js?v=6.5"></script>
+  <script type="module" src="js/app.js?v=6.8"></script>
 </body>
 </html>

@@ -1107,3 +1107,172 @@ input, select, textarea { max-width:100%; }
 .destructive-action { color:#ff9da3 !important; border-color:rgba(197,91,99,.45) !important; background:rgba(163,59,67,.12) !important; }
 .destructive-action:hover { color:#fff !important; background:#a33b43 !important; border-color:#c55b63 !important; }
 .scan-logo[hidden] { display:none !important; }
+
+/* v6.8 — polished customer filters and date-range controls */
+.customer-filters {
+  display:grid;
+  grid-template-columns:minmax(230px,1.25fr) minmax(145px,.78fr) minmax(145px,.78fr) minmax(410px,1.65fr);
+  align-items:stretch;
+  gap:12px;
+  padding:15px;
+  border-color:#293847;
+  background:linear-gradient(145deg,rgba(25,34,45,.98),rgba(17,23,32,.98));
+}
+.customer-filters > input,
+.customer-filters > select {
+  width:100%;
+  min-width:0;
+  min-height:46px;
+  height:46px;
+  padding:0 13px;
+  border:1px solid #344657;
+  border-radius:11px;
+  background:#0e1722;
+  color:var(--text);
+  font-size:12px;
+  transition:border-color .18s ease,box-shadow .18s ease,background .18s ease;
+}
+.customer-filters > input::placeholder { color:#8291a1; opacity:1; }
+.customer-filters > input:hover,
+.customer-filters > select:hover { border-color:#526879; background:#111d2a; }
+.customer-filters > input:focus,
+.customer-filters > select:focus {
+  border-color:var(--cyan);
+  background:#101d29;
+  box-shadow:0 0 0 3px rgba(47,217,199,.10);
+}
+.customer-date-filter {
+  min-width:0;
+  display:grid;
+  grid-template-columns:minmax(112px,.68fr) minmax(0,1.65fr) auto;
+  align-items:center;
+  gap:11px;
+  padding:9px 10px;
+  border:1px solid #344657;
+  border-radius:13px;
+  background:linear-gradient(125deg,rgba(24,43,53,.72),rgba(13,24,34,.96));
+  transition:border-color .18s ease,box-shadow .18s ease,background .18s ease;
+}
+.customer-date-filter.is-active {
+  border-color:rgba(47,217,199,.55);
+  box-shadow:inset 0 0 0 1px rgba(47,217,199,.08);
+}
+.customer-date-filter.has-error { border-color:rgba(241,125,130,.8); }
+.date-filter-heading { display:flex; align-items:center; gap:9px; min-width:0; }
+.date-filter-icon {
+  display:grid;
+  place-items:center;
+  flex:0 0 36px;
+  width:36px;
+  height:36px;
+  border:1px solid rgba(47,217,199,.2);
+  border-radius:10px;
+  background:rgba(47,217,199,.09);
+  color:var(--cyan);
+  font-size:18px;
+  line-height:1;
+}
+.date-filter-heading-copy { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.date-filter-heading-copy strong { color:#eaf2f5; font-size:11px; white-space:nowrap; }
+.date-filter-heading-copy small { color:var(--muted); font-size:9px; white-space:nowrap; }
+.date-filter-state-active .date-filter-heading-copy small { color:var(--cyan); }
+.date-range-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; min-width:0; }
+.date-input-wrap { display:flex; flex-direction:column; gap:4px; min-width:0; color:#aab8c5; font-size:9px; font-weight:700; }
+.date-input-wrap input {
+  display:block;
+  width:100%;
+  min-width:0;
+  min-height:38px;
+  height:38px;
+  padding:0 8px;
+  border:1px solid #354a5c;
+  border-radius:9px;
+  background:#0b1520;
+  color:#edf4f6;
+  color-scheme:dark;
+  font-family:inherit;
+  font-size:11px;
+  font-weight:500;
+  direction:ltr;
+  text-align:center;
+  transition:border-color .18s ease,box-shadow .18s ease;
+}
+.date-input-wrap input:hover { border-color:#5a7082; }
+.date-input-wrap input:focus { border-color:var(--cyan); box-shadow:0 0 0 3px rgba(47,217,199,.10); }
+.date-input-wrap input::-webkit-calendar-picker-indicator { cursor:pointer; opacity:.82; filter:invert(.78) sepia(.2) saturate(.8); }
+.date-filter-actions { display:flex; align-items:center; gap:6px; }
+.date-quick-btn,.date-clear-btn {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  flex:0 0 auto;
+  min-height:37px;
+  padding:0 10px;
+  border:1px solid #3a5261;
+  border-radius:9px;
+  color:#dce8eb;
+  background:#1b2a37;
+  font-family:inherit;
+  font-size:10px;
+  font-weight:700;
+  white-space:nowrap;
+  cursor:pointer;
+  transition:transform .18s ease,border-color .18s ease,background .18s ease,color .18s ease;
+}
+.date-quick-btn { border-color:rgba(47,217,199,.28); color:#9ceee4; background:rgba(47,217,199,.09); }
+.date-quick-btn span { font-size:15px; line-height:1; }
+.date-clear-btn { color:#bdc8d1; background:rgba(255,255,255,.035); }
+.date-quick-btn:hover,.date-clear-btn:hover { transform:translateY(-1px); border-color:var(--cyan); }
+.date-quick-btn:hover { background:rgba(47,217,199,.16); }
+.date-clear-btn:hover { color:#fff; background:rgba(255,255,255,.08); }
+.date-clear-btn:disabled { opacity:.38; cursor:not-allowed; transform:none; border-color:#354452; }
+.date-quick-btn:focus-visible,.date-clear-btn:focus-visible { outline:2px solid var(--cyan); outline-offset:2px; }
+@media(max-width:1350px) {
+  .customer-filters { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+  .customer-filters > input { grid-column:1/-1; }
+  .customer-date-filter { grid-column:1/-1; }
+}
+@media(max-width:820px) {
+  .customer-filters { gap:9px; padding:12px; }
+  .customer-filters > input,.customer-filters > select { min-height:44px; height:44px; }
+  .customer-date-filter {
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:10px 12px;
+    padding:11px;
+  }
+  .date-filter-heading { grid-column:1/-1; }
+  .date-filter-icon { width:34px; height:34px; flex-basis:34px; }
+  .date-range-fields { gap:9px; }
+  .date-input-wrap input { min-height:42px; height:42px; font-size:12px; }
+  .date-filter-actions { justify-content:flex-end; }
+  .date-quick-btn,.date-clear-btn { min-height:42px; padding-inline:12px; }
+}
+@media(max-width:560px) {
+  .customer-filters { grid-template-columns:repeat(2,minmax(0,1fr)); padding:11px; gap:8px; }
+  .customer-filters > input { grid-column:1/-1; }
+  .customer-filters > select { font-size:11px; padding-inline:9px; }
+  .customer-date-filter {
+    grid-column:1/-1;
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:10px;
+    padding:11px;
+    border-radius:12px;
+  }
+  .date-filter-heading { grid-column:1/-1; padding-bottom:8px; border-bottom:1px solid rgba(142,164,180,.14); }
+  .date-filter-heading-copy strong { font-size:12px; }
+  .date-filter-heading-copy small { font-size:10px; }
+  .date-range-fields { grid-column:1/-1; gap:8px; }
+  .date-input-wrap { gap:5px; font-size:10px; }
+  .date-input-wrap input { min-height:44px; height:44px; padding-inline:5px; border-radius:9px; font-size:11px; }
+  .date-filter-actions { grid-column:1/-1; display:grid; grid-template-columns:1fr 1fr; }
+  .date-quick-btn,.date-clear-btn { width:100%; min-height:40px; font-size:11px; }
+}
+@media(max-width:350px) {
+  .customer-filters { grid-template-columns:minmax(0,1fr); }
+  .customer-filters > input,.customer-filters > select { grid-column:1; }
+  .date-range-fields { grid-template-columns:minmax(0,1fr); }
+}
+@media(prefers-reduced-motion:reduce) {
+  .customer-filters > input,.customer-filters > select,.customer-date-filter,.date-input-wrap input,.date-quick-btn,.date-clear-btn { transition:none; }
+}

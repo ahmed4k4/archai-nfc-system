@@ -575,6 +575,9 @@ function renderCustomers() {
   const search = $('#customerSearch').value.trim().toLocaleLowerCase('ar');
   const brandId = isSuper() ? $('#brandFilter').value : profile?.brandId;
   const branchId = $('#branchFilter').value;
+  const dateFrom = parseDateInput($('#customerDateFrom')?.value || '');
+  const dateTo = parseDateInput($('#customerDateTo')?.value || '');
+  const dateToExclusive = dateTo ? new Date(dateTo.getFullYear(), dateTo.getMonth(), dateTo.getDate() + 1).getTime() : null;
   const filtered = customers.filter((customer) => {
     const searchable = [
       customer.name, customer.phone, customer.purchase, customer.product,
@@ -582,7 +585,9 @@ function renderCustomers() {
     ].join(' ').toLocaleLowerCase('ar');
     return (!search || searchable.includes(search)) &&
       (!brandId || customer.brandId === brandId) &&
-      (!branchId || customer.branchId === branchId);
+      (!branchId || customer.branchId === branchId) &&
+      (!dateFrom || customerDateMillis(customer.createdAt) >= dateFrom.getTime()) &&
+      (!dateToExclusive || customerDateMillis(customer.createdAt) < dateToExclusive);
   });
   const totalPages = Math.max(1, Math.ceil(filtered.length / CUSTOMER_PAGE_SIZE));
   customerPage = Math.min(Math.max(1, customerPage), totalPages);
@@ -1057,6 +1062,59 @@ $('#addBranchBtn').onclick = () => {
 $('#customerSearch').oninput = () => { customerPage = 1; renderCustomers(); };
 $('#brandFilter').onchange = () => { customerPage = 1; fillSelectors(); renderCustomers(); };
 $('#branchFilter').onchange = () => { customerPage = 1; renderCustomers(); };
+function parseDateInput(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day ? date : null;
+}
+function syncCustomerDateFilterUI(error = false) {
+  const wrapper = $('.customer-date-filter');
+  if (!wrapper) return;
+  const from = $('#customerDateFrom').value;
+  const to = $('#customerDateTo').value;
+  const active = Boolean(from || to);
+  wrapper.classList.toggle('is-active', active);
+  wrapper.classList.toggle('has-error', error);
+  wrapper.classList.toggle('date-filter-state-active', active && !error);
+  const state = $('#customerDateFilterState');
+  if (state) state.textContent = error ? 'راجع نطاق التاريخ' : active ? 'فلتر التاريخ مفعّل' : 'كل التواريخ';
+  const clearButton = $('#customerDateClearBtn');
+  if (clearButton) clearButton.disabled = !active;
+}
+function updateCustomerDateFilter() {
+  const from = $('#customerDateFrom').value;
+  const to = $('#customerDateTo').value;
+  if (from && to && from > to) {
+    $('#customerDateTo').setCustomValidity('تاريخ النهاية يجب أن يكون بعد تاريخ البداية أو مساويًا له.');
+    $('#customerDateTo').reportValidity();
+    $('#customerDateTo').setCustomValidity('');
+    syncCustomerDateFilterUI(true);
+    return;
+  }
+  syncCustomerDateFilterUI();
+  customerPage = 1;
+  renderCustomers();
+}
+$('#customerDateFrom').onchange = updateCustomerDateFilter;
+$('#customerDateTo').onchange = updateCustomerDateFilter;
+$('#customerTodayBtn').onclick = () => {
+  const today = new Date();
+  const localDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  $('#customerDateFrom').value = localDate;
+  $('#customerDateTo').value = localDate;
+  syncCustomerDateFilterUI();
+  customerPage = 1;
+  renderCustomers();
+};
+$('#customerDateClearBtn').onclick = () => {
+  $('#customerDateFrom').value = '';
+  $('#customerDateTo').value = '';
+  syncCustomerDateFilterUI();
+  customerPage = 1;
+  renderCustomers();
+};
+syncCustomerDateFilterUI();
 $('#branchBrandFilter').onchange = () => renderBranches();
 $('#refreshBtn').onclick = async () => {
   setButtonBusy($('#refreshBtn'), true, '...');
@@ -1330,7 +1388,12 @@ $('#exportBtn').onclick = async () => {
     const exportBranches = branches
       .filter((branch) => superAdminExport || branch.brandId === ownBrandId)
       .sort((a, b) => `${a.brandName || ''} ${a.name || ''}`.localeCompare(`${b.brandName || ''} ${b.name || ''}`, 'ar'));
-    const exportRows = superAdminExport ? all.slice() : all.filter((customer) => customer.brandId === ownBrandId);
+    const dateFrom = parseDateInput($('#customerDateFrom')?.value || '');
+    const dateTo = parseDateInput($('#customerDateTo')?.value || '');
+    const dateToExclusive = dateTo ? new Date(dateTo.getFullYear(), dateTo.getMonth(), dateTo.getDate() + 1).getTime() : null;
+    const exportRows = (superAdminExport ? all.slice() : all.filter((customer) => customer.brandId === ownBrandId))
+      .filter((customer) => (!dateFrom || customerDateMillis(customer.createdAt) >= dateFrom.getTime()) &&
+        (!dateToExclusive || customerDateMillis(customer.createdAt) < dateToExclusive));
 
     const branchKeys = new Set(exportBranches.map((branch) => `${branch.brandId}::${branch.id}`));
     const unmatchedCount = exportRows.filter((customer) => !branchKeys.has(`${customer.brandId}::${customer.branchId}`)).length;

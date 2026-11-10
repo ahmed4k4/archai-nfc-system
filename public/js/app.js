@@ -618,6 +618,7 @@ function fillSelectors() {
   if (brands.some((brand) => brand.id === selectedBrand)) $('#brandFilter').value = selectedBrand;
   $('#brandFilter').classList.toggle('hidden', !isSuper());
   $('#brandFilter').setAttribute('aria-hidden', String(!isSuper()));
+  $('#page-customers .customer-filters')?.classList.toggle('is-brand-admin', !isSuper());
 
   const branchesBrandFilter = $('#branchBrandFilter');
   if (branchesBrandFilter) {

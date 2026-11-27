@@ -32,6 +32,7 @@ let qrLibraryPromise = null;
 let xlsxLibraryPromise = null;
 let brandImageOptions = [];
 let customerPage = 1;
+let customerPhoneAnalysis = { groups: new Map(), byCustomerId: new Map() };
 const CUSTOMER_PAGE_SIZE = 12;
 
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
@@ -180,6 +181,7 @@ async function loadAll() {
     const snapshot = await getDocs(customerQuery);
     customers = snapshot.docs.map((document) => ({ id: document.id, ...document.data() }));
     customers.sort((a, b) => customerDateMillis(b.createdAt) - customerDateMillis(a.createdAt));
+    customerPhoneAnalysis = buildCustomerPhoneAnalysis(customers);
     customerLoadError = null;
     branchCustomerCounts = new Map();
     for (const customer of customers) {
@@ -188,6 +190,7 @@ async function loadAll() {
     }
   } catch (error) {
     customers = [];
+    customerPhoneAnalysis = { groups: new Map(), byCustomerId: new Map() };
     branchCustomerCounts = new Map();
     customerLoadError = error;
   }
@@ -202,6 +205,67 @@ function customerDateMillis(value) {
   if (value instanceof Date) return value.getTime();
   if (typeof value === 'number') return value;
   return 0;
+}
+
+// Phone identity is based on a normalized number, not the original display format.
+// Egyptian mobile formats such as 010... and +20 10... resolve to the same key.
+function normalizePhoneNumber(value) {
+  const translated = String(value ?? '').replace(/[٠-٩۰-۹]/g, (digit) => {
+    const code = digit.charCodeAt(0);
+    return String(code >= 0x06F0 ? code - 0x06F0 : code - 0x0660);
+  });
+  let digits = translated.replace(/\D/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  if (/^01[0125]\d{8}$/.test(digits)) digits = `20${digits.slice(1)}`;
+  else if (/^1[0125]\d{8}$/.test(digits)) digits = `20${digits}`;
+  return digits.length >= 7 ? digits : '';
+}
+
+function buildCustomerPhoneAnalysis(rows) {
+  const groups = new Map();
+  const byCustomerId = new Map();
+  for (const customer of rows) {
+    const phoneKey = normalizePhoneNumber(customer.phone);
+    if (!phoneKey) continue;
+    if (!groups.has(phoneKey)) groups.set(phoneKey, { phone: phoneKey, customers: [], count: 0, firstAt: 0, lastAt: 0 });
+    groups.get(phoneKey).customers.push(customer);
+  }
+  for (const group of groups.values()) {
+    group.customers.sort((a, b) => customerDateMillis(a.createdAt) - customerDateMillis(b.createdAt)
+      || String(a.id || '').localeCompare(String(b.id || '')));
+    group.count = group.customers.length;
+    group.firstAt = customerDateMillis(group.customers[0]?.createdAt);
+    group.lastAt = customerDateMillis(group.customers[group.customers.length - 1]?.createdAt);
+    group.customers.forEach((customer, index) => {
+      byCustomerId.set(customer.id, {
+        phone: group.phone,
+        count: group.count,
+        position: index + 1,
+        firstAt: group.firstAt,
+        lastAt: group.lastAt,
+        group,
+      });
+    });
+  }
+  return { groups, byCustomerId };
+}
+
+function customerPhoneInfo(customer, analysis = customerPhoneAnalysis) {
+  return analysis.byCustomerId.get(customer?.id) || {
+    phone: '', count: 0, position: 0, firstAt: 0, lastAt: 0, group: null,
+  };
+}
+
+function customerPhoneStatus(customer, analysis = customerPhoneAnalysis) {
+  const info = customerPhoneInfo(customer, analysis);
+  if (!info.phone) return { key: 'missing', label: 'بدون رقم صالح', info };
+  if (info.count > 1) return { key: 'duplicate', label: `متكرر × ${info.count.toLocaleString('ar-EG')}`, info };
+  return { key: 'new', label: 'جديد · مرة واحدة', info };
+}
+
+function formatCustomerDate(value) {
+  const millis = customerDateMillis(value);
+  return millis ? new Date(millis).toLocaleString('ar-EG') : '—';
 }
 
 function branchCustomerCount(branchId) {
@@ -246,9 +310,14 @@ function customerCards(rows, { compact = false } = {}) {
   return `<div class="customer-cards ${compact ? 'compact' : ''}">${rows.map((customer) => {
     const extraEntries = Object.entries(customer.customFields || {}).filter(([, value]) => value !== '' && value != null);
     const extra = extraEntries.map(([key, value]) => `<span class="customer-chip"><b>${esc(fieldLabel(customer.brandId, key))}</b><span>${esc(value)}</span></span>`).join('');
-    const date = customerDateMillis(customer.createdAt) ? new Date(customerDateMillis(customer.createdAt)).toLocaleString('ar-EG') : '—';
+    const date = formatCustomerDate(customer.createdAt);
+    const phoneStatus = customerPhoneStatus(customer);
+    const phoneOccurrence = phoneStatus.key === 'duplicate'
+      ? `<span class="repeat-position">التسجيل ${phoneStatus.info.position.toLocaleString('ar-EG')} من ${phoneStatus.info.count.toLocaleString('ar-EG')}</span>`
+      : '';
     return `<article class="customer-card" data-customer-id="${esc(customer.id)}" tabindex="0" role="group" aria-label="اضغط لعرض تفاصيل ${esc(customer.name || 'العميل')}">
       <div class="customer-card-top"><div class="customer-avatar">${esc(String(customer.name || 'ع').trim().charAt(0) || 'ع')}</div><div class="customer-primary"><b>${esc(customer.name || 'بدون اسم')}</b><a href="tel:${esc(customer.phone || '')}" dir="ltr">${esc(customer.phone || '—')}</a></div><time>${esc(date)}</time></div>
+      <div class="customer-phone-status"><span class="repeat-badge ${phoneStatus.key}">${esc(phoneStatus.label)}</span>${phoneOccurrence}</div>
       <div class="customer-card-meta"><span><small>البراند</small><b>${esc(customer.brandName || '—')}</b></span><span><small>الفرع</small><b>${esc(customer.branchName || '—')}</b></span><span><small>المنتج</small><b>${esc(customer.purchase || customer.product || '—')}</b></span><span><small>المصدر</small><b class="source-pill ${customer.source === 'nfc' ? 'nfc' : 'qr'}">${customer.source === 'nfc' ? 'NFC' : 'QR'}</b></span></div>
       ${extra ? `<div class="customer-extras">${extra}</div>` : ''}
       <div class="customer-card-footer"><span>اضغط لعرض التفاصيل</span><button type="button" class="action-btn" data-customer-details="${esc(customer.id)}">التفاصيل</button></div>
@@ -262,8 +331,15 @@ function customerDetailsModal(customer) {
   const date = customerDateMillis(customer.createdAt)
     ? new Date(customerDateMillis(customer.createdAt)).toLocaleString('ar-EG') : '—';
   const fields = Object.entries(customer.customFields || {}).filter(([, value]) => value !== '' && value != null);
+  const phoneStatus = customerPhoneStatus(customer);
+  const phoneInfo = phoneStatus.info;
   const details = [
     ['الاسم', customer.name], ['رقم الهاتف', customer.phone],
+    ['تصنيف رقم الهاتف', phoneStatus.label],
+    ['عدد مرات ظهور الرقم', phoneInfo.phone ? phoneInfo.count : 'غير متاح'],
+    ['ترتيب هذا التسجيل', phoneInfo.phone ? `${phoneInfo.position} من ${phoneInfo.count}` : '—'],
+    ['أول تسجيل لهذا الرقم', phoneInfo.firstAt ? formatCustomerDate(phoneInfo.firstAt) : '—'],
+    ['أحدث تسجيل لهذا الرقم', phoneInfo.lastAt ? formatCustomerDate(phoneInfo.lastAt) : '—'],
     ['البراند', customer.brandName], ['الفرع', customer.branchName],
     ['المنتج', customer.purchase || customer.product], ['مصدر التسجيل', customer.source === 'nfc' ? 'NFC' : 'QR'],
     ['تاريخ التسجيل', date], ['موافقة العميل', customer.consent === true ? 'وافق على استخدام البيانات' : 'غير مسجلة'],
@@ -271,10 +347,19 @@ function customerDetailsModal(customer) {
     ['إصدار الموافقة', customer.consentVersion || '—'],
     ...fields.map(([key, value]) => [fieldLabel(customer.brandId, key), value]),
   ];
+  const duplicateHistory = phoneInfo.count > 1 ? phoneInfo.group.customers
+    .filter((item) => item.id !== customer.id)
+    .slice().sort((a, b) => customerDateMillis(b.createdAt) - customerDateMillis(a.createdAt)).slice(0, 8) : [];
+  const historyMarkup = phoneInfo.count > 1 ? `<section class="phone-duplicate-history">
+    <div class="phone-history-heading"><b>سجل مرات استخدام رقم الهاتف</b><span>${phoneInfo.count.toLocaleString('ar-EG')} مرات</span></div>
+    <ol>${[customer, ...duplicateHistory].sort((a, b) => customerDateMillis(b.createdAt) - customerDateMillis(a.createdAt)).map((item) => `<li><b>${esc(item.name || 'بدون اسم')}</b><span>${isSuper() ? `${esc(item.brandName || '—')} · ` : ''}${esc(item.branchName || '—')} · ${esc(formatCustomerDate(item.createdAt))}</span></li>`).join('')}</ol>
+    ${phoneInfo.count > 9 ? `<small>يتم عرض التسجيل الحالي وأحدث 8 تسجيلات أخرى من إجمالي ${phoneInfo.count.toLocaleString('ar-EG')} تسجيلات.</small>` : ''}
+  </section>` : '';
   root.innerHTML = `<div class="modal-backdrop" data-backdrop><section class="modal customer-detail-modal" role="dialog" aria-modal="true" aria-label="تفاصيل العميل">
     <div class="modal-heading"><div><span class="eyebrow">CUSTOMER PROFILE</span><h3>${esc(customer.name || 'بيانات العميل')}</h3><p>${esc(customer.brandName || '—')} · ${esc(customer.branchName || '—')}</p></div><span class="source-pill ${customer.source === 'nfc' ? 'nfc' : 'qr'}">${customer.source === 'nfc' ? 'NFC' : 'QR'}</span></div>
     ${brand?.image && safeBrandImagePath(brand.image) ? `<img class="customer-brand-image" src="${esc(brand.image)}" alt="${esc(brand.name)}">` : ''}
     <div class="customer-detail-grid">${details.map(([label, value]) => `<div class="customer-detail-item"><small>${esc(label)}</small><b>${esc(value == null || value === '' ? '—' : value)}</b></div>`).join('')}</div>
+    ${historyMarkup}
     <div class="modal-actions customer-detail-actions"><button type="button" class="btn subtle" data-close>إغلاق</button><button type="button" class="btn danger" data-delete-customer="${esc(customer.id)}">حذف العميل</button></div>
   </section></div>`;
   const close = () => { root.innerHTML = ''; };
@@ -290,6 +375,7 @@ async function deleteCustomer(customerId) {
   if (!accepted) return false;
   await remove('customers', customer.id);
   customers = customers.filter((item) => item.id !== customer.id);
+  customerPhoneAnalysis = buildCustomerPhoneAnalysis(customers);
   if (customer.branchId && branchCustomerCounts.has(customer.branchId)) {
     const nextCount = Math.max(0, branchCustomerCounts.get(customer.branchId) - 1);
     if (nextCount) branchCustomerCounts.set(customer.branchId, nextCount);
@@ -578,7 +664,7 @@ function renderCustomers() {
   const dateFrom = parseDateInput($('#customerDateFrom')?.value || '');
   const dateTo = parseDateInput($('#customerDateTo')?.value || '');
   const dateToExclusive = dateTo ? new Date(dateTo.getFullYear(), dateTo.getMonth(), dateTo.getDate() + 1).getTime() : null;
-  const filtered = customers.filter((customer) => {
+  const baseFiltered = customers.filter((customer) => {
     const searchable = [
       customer.name, customer.phone, customer.purchase, customer.product,
       customer.brandName, customer.branchName, ...Object.values(customer.customFields || {}),
@@ -589,6 +675,42 @@ function renderCustomers() {
       (!dateFrom || customerDateMillis(customer.createdAt) >= dateFrom.getTime()) &&
       (!dateToExclusive || customerDateMillis(customer.createdAt) < dateToExclusive);
   });
+
+  const duplicateFilter = $('#customerDuplicateFilter')?.value || 'all';
+  const sortMode = $('#customerSort')?.value || 'newest';
+  const filtered = baseFiltered.filter((customer) => {
+    const count = customerPhoneInfo(customer).count;
+    if (duplicateFilter === 'duplicates') return count > 1;
+    if (duplicateFilter === 'new') return count === 1;
+    if (duplicateFilter === 'missing') return count === 0;
+    return true;
+  });
+  const visibleDuplicatePhones = new Set();
+  let visibleDuplicateRecords = 0;
+  let visibleNewRecords = 0;
+  let visibleMissingPhones = 0;
+  for (const customer of filtered) {
+    const info = customerPhoneInfo(customer);
+    if (info.count > 1) {
+      visibleDuplicatePhones.add(info.phone);
+      visibleDuplicateRecords += 1;
+    } else if (info.count === 1) visibleNewRecords += 1;
+    else visibleMissingPhones += 1;
+  }
+
+  filtered.sort((a, b) => {
+    const dateDiff = customerDateMillis(a.createdAt) - customerDateMillis(b.createdAt);
+    const infoA = customerPhoneInfo(a);
+    const infoB = customerPhoneInfo(b);
+    const countA = infoA.phone ? infoA.count : -1;
+    const countB = infoB.phone ? infoB.count : -1;
+    const countDiff = countA - countB;
+    if (sortMode === 'oldest') return dateDiff || String(a.id).localeCompare(String(b.id));
+    if (sortMode === 'mostRepeated') return countDiff * -1 || dateDiff * -1 || String(a.id).localeCompare(String(b.id));
+    if (sortMode === 'leastRepeated') return (countA < 0 ? Number.MAX_SAFE_INTEGER : countA) - (countB < 0 ? Number.MAX_SAFE_INTEGER : countB) || dateDiff * -1 || String(a.id).localeCompare(String(b.id));
+    return dateDiff * -1 || String(a.id).localeCompare(String(b.id));
+  });
+
   const totalPages = Math.max(1, Math.ceil(filtered.length / CUSTOMER_PAGE_SIZE));
   customerPage = Math.min(Math.max(1, customerPage), totalPages);
   const start = (customerPage - 1) * CUSTOMER_PAGE_SIZE;
@@ -605,7 +727,17 @@ function renderCustomers() {
       <span class="pagination-summary">عرض ${rangeStart.toLocaleString('ar-EG')}–${rangeEnd.toLocaleString('ar-EG')} من ${filtered.length.toLocaleString('ar-EG')}</span>
       <div class="pagination-controls"><button type="button" class="page-arrow" data-customer-page="${customerPage - 1}" ${customerPage === 1 ? 'disabled' : ''}>السابق</button>${pageButtons.join('')}<button type="button" class="page-arrow" data-customer-page="${customerPage + 1}" ${customerPage === totalPages ? 'disabled' : ''}>التالي</button></div>
     </nav>` : '';
-  $('#customersList').innerHTML = `<div class="results-toolbar"><span>عدد النتائج المطابقة</span><b>${filtered.length.toLocaleString('ar-EG')} عميل</b><small>مرتبة من الأحدث إلى الأقدم · ${CUSTOMER_PAGE_SIZE} عميل في الصفحة</small></div>${customerCards(currentRows)}${pagination}`;
+
+  const insights = `<div class="customer-repeat-summary" aria-label="ملخص تكرار أرقام الهاتف">
+    <div class="repeat-stat"><span class="repeat-stat-icon duplicate">↻</span><div><small>أرقام متكررة ضمن النتائج</small><b>${visibleDuplicatePhones.size.toLocaleString('ar-EG')}</b></div></div>
+    <div class="repeat-stat"><span class="repeat-stat-icon duplicate">×</span><div><small>سجلات لأرقام متكررة</small><b>${visibleDuplicateRecords.toLocaleString('ar-EG')}</b></div></div>
+    <div class="repeat-stat"><span class="repeat-stat-icon new">✓</span><div><small>أرقام ظهرت مرة واحدة</small><b>${visibleNewRecords.toLocaleString('ar-EG')}</b></div></div>
+    <div class="repeat-stat"><span class="repeat-stat-icon missing">?</span><div><small>أرقام غير صالحة أو فارغة</small><b>${visibleMissingPhones.toLocaleString('ar-EG')}</b></div></div>
+  </div>`;
+  const sortLabels = { newest: 'الأحدث أولًا', oldest: 'الأقدم أولًا', mostRepeated: 'الأكثر تكرارًا', leastRepeated: 'الأقل تكرارًا' };
+  const filterLabels = { all: 'كل العملاء', duplicates: 'الأرقام المتكررة فقط', new: 'الأرقام الجديدة فقط', missing: 'بدون رقم صالح' };
+  const resultLabel = `${filterLabels[duplicateFilter] || filterLabels.all} · ${sortLabels[sortMode] || sortLabels.newest}`;
+  $('#customersList').innerHTML = `${insights}<div class="results-toolbar"><span>عدد النتائج المطابقة</span><b>${filtered.length.toLocaleString('ar-EG')} عميل</b><small>${esc(resultLabel)} · ${CUSTOMER_PAGE_SIZE} عميل في الصفحة</small></div>${customerCards(currentRows)}${pagination}`;
 }
 
 function fillSelectors() {
@@ -1063,6 +1195,8 @@ $('#addBranchBtn').onclick = () => {
 $('#customerSearch').oninput = () => { customerPage = 1; renderCustomers(); };
 $('#brandFilter').onchange = () => { customerPage = 1; fillSelectors(); renderCustomers(); };
 $('#branchFilter').onchange = () => { customerPage = 1; renderCustomers(); };
+$('#customerDuplicateFilter').onchange = () => { customerPage = 1; renderCustomers(); };
+$('#customerSort').onchange = () => { customerPage = 1; renderCustomers(); };
 function parseDateInput(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const [year, month, day] = value.split('-').map(Number);
@@ -1275,7 +1409,7 @@ function currentBrandExportFields(brand) {
     .filter((field) => field && field.key);
 }
 
-function buildBranchCustomerSheet(XLSX, { branch, brand, branchRows, usedSheetNames, appendContext }) {
+function buildBranchCustomerSheet(XLSX, { branch, brand, branchRows, phoneAnalysis, usedSheetNames, appendContext }) {
   const configuredFields = currentBrandExportFields(brand)
     .filter((field) => !['name', 'phone', 'purchase'].includes(field.key));
   const customKeys = [...new Set([
@@ -1284,7 +1418,8 @@ function buildBranchCustomerSheet(XLSX, { branch, brand, branchRows, usedSheetNa
   ])];
   const fieldLabels = new Map(configuredFields.map((field) => [field.key, field.label || field.key]));
   const baseHeaders = [
-    'الاسم', 'رقم الهاتف', 'المنتج', 'مصدر التسجيل', 'موافقة العميل', 'تاريخ التسجيل',
+    'الاسم', 'رقم الهاتف', 'حالة رقم الهاتف', 'عدد مرات ظهور الرقم', 'ترتيب هذا التسجيل',
+    'المنتج', 'مصدر التسجيل', 'موافقة العميل', 'تاريخ التسجيل',
     ...customKeys.map((key) => fieldLabels.get(key) || key),
   ];
   const headers = [];
@@ -1297,29 +1432,35 @@ function buildBranchCustomerSheet(XLSX, { branch, brand, branchRows, usedSheetNa
   const brandName = brand?.name || branch.brandName || 'البراند';
   const branchTitle = `تقرير عملاء ${brandName} - ${branch.name}`;
   const branchSubtitle = `البراند: ${brandName} | الفرع: ${branch.name} | عدد العملاء: ${branchRows.length} | الترتيب: الأحدث أولًا`;
-  const rows = branchRows.map((customer) => [
-    excelSafeText(customer.name),
-    excelSafeText(customer.phone),
-    excelSafeText(customer.purchase || customer.product),
-    customer.source === 'nfc' ? 'NFC' : 'QR',
-    customer.consent === true ? 'موافق' : 'غير مسجل',
-    excelDate(customer.createdAt),
-    ...customKeys.map((key) => excelSafeText(customer.customFields?.[key])),
-  ]);
+  const rows = branchRows.map((customer) => {
+    const phoneStatus = customerPhoneStatus(customer, phoneAnalysis);
+    return [
+      excelSafeText(customer.name),
+      excelSafeText(customer.phone),
+      phoneStatus.label,
+      phoneStatus.info.phone ? phoneStatus.info.count : 0,
+      phoneStatus.info.phone ? phoneStatus.info.position : '',
+      excelSafeText(customer.purchase || customer.product),
+      customer.source === 'nfc' ? 'NFC' : 'QR',
+      customer.consent === true ? 'موافق' : 'غير مسجل',
+      excelDate(customer.createdAt),
+      ...customKeys.map((key) => excelSafeText(customer.customFields?.[key])),
+    ];
+  });
   const sheetName = uniqueExcelSheetName(brandName, branch.name, usedSheetNames);
   makeExcelReportSheet(XLSX, {
     title: branchTitle,
     subtitle: branchSubtitle,
     headers,
     rows,
-    widths: [25, 20, 26, 16, 17, 23, ...customKeys.map(() => 24)],
-    dateColumns: [5],
+    widths: [25, 20, 22, 18, 18, 26, 16, 17, 23, ...customKeys.map(() => 24)],
+    dateColumns: [8],
     usedNames: appendContext,
     sheetName,
   });
 }
 
-function exportBrandInformationSheets(XLSX, { brand, brandBranches, brandCustomers, appendContext }) {
+function exportBrandInformationSheets(XLSX, { brand, brandBranches, brandCustomers, phoneAnalysis, appendContext }) {
   const activeBranches = brandBranches.filter((branch) => branch.active !== false).length;
   const createdAt = excelDate(brand.createdAt);
   const infoRows = [
@@ -1330,6 +1471,9 @@ function exportBrandInformationSheets(XLSX, { brand, brandBranches, brandCustome
     ['الفروع النشطة', activeBranches],
     ['الفروع المتوقفة', brandBranches.length - activeBranches],
     ['إجمالي العملاء', brandCustomers.length],
+    ['أرقام الهواتف المتكررة', [...phoneAnalysis.groups.values()].filter((group) => group.count > 1 && group.customers.some((customer) => customer.brandId === brand.id)).length],
+    ['سجلات بأرقام متكررة', brandCustomers.filter((customer) => (phoneAnalysis.byCustomerId.get(customer.id)?.count || 0) > 1).length],
+    ['أرقام ظهرت مرة واحدة', brandCustomers.filter((customer) => phoneAnalysis.byCustomerId.get(customer.id)?.count === 1).length],
     ['معرّف البراند', excelSafeText(brand.id)],
     ['مسار صورة البراند', excelSafeText(brand.image || 'غير محدد')],
     ['تاريخ إنشاء البراند', createdAt],
@@ -1363,6 +1507,94 @@ function exportBrandInformationSheets(XLSX, { brand, brandBranches, brandCustome
   });
 }
 
+function uniqueExcelList(values) {
+  return [...new Set(values.map((value) => String(value || '').trim()).filter(Boolean))].join('، ');
+}
+
+function buildPhoneDuplicateExcelSheets(XLSX, { exportRows, phoneAnalysis, superAdminExport, appendContext }) {
+  const reportCustomersByPhone = new Map();
+  for (const customer of exportRows) {
+    const phoneKey = normalizePhoneNumber(customer.phone);
+    if (!phoneKey) continue;
+    if (!reportCustomersByPhone.has(phoneKey)) reportCustomersByPhone.set(phoneKey, []);
+    reportCustomersByPhone.get(phoneKey).push(customer);
+  }
+  const duplicateGroups = [...phoneAnalysis.groups.values()]
+    .filter((group) => group.count > 1 && reportCustomersByPhone.has(group.phone))
+    .sort((a, b) => b.count - a.count || b.lastAt - a.lastAt);
+  const duplicateRows = exportRows.filter((customer) => {
+    const info = phoneAnalysis.byCustomerId.get(customer.id);
+    return info?.count > 1;
+  }).sort((a, b) => {
+    const countDiff = (phoneAnalysis.byCustomerId.get(b.id)?.count || 0) - (phoneAnalysis.byCustomerId.get(a.id)?.count || 0);
+    return countDiff || customerDateMillis(b.createdAt) - customerDateMillis(a.createdAt);
+  });
+
+  const summaryRows = duplicateGroups.map((group) => {
+    const inReport = reportCustomersByPhone.get(group.phone) || [];
+    const reportNames = uniqueExcelList(inReport.map((customer) => customer.name));
+    const reportBranches = uniqueExcelList(inReport.map((customer) => customer.branchName));
+    const reportBrands = superAdminExport ? uniqueExcelList(inReport.map((customer) => customer.brandName)) : '';
+    const reportProducts = uniqueExcelList(inReport.map((customer) => customer.purchase || customer.product));
+    return [
+      excelSafeText(group.phone),
+      group.count,
+      inReport.length,
+      group.count - inReport.length,
+      excelDate(group.firstAt),
+      excelDate(group.lastAt),
+      excelSafeText(reportNames || '—'),
+      excelSafeText(reportBranches || '—'),
+      ...(superAdminExport ? [excelSafeText(reportBrands || '—')] : []),
+      excelSafeText(reportProducts || '—'),
+    ];
+  });
+  if (!summaryRows.length) summaryRows.push(['لا توجد أرقام متكررة ضمن نطاق البيانات المتاح للتقرير.', '', '', '', '', '', '', '', ...(superAdminExport ? [''] : []), '']);
+
+  const summaryHeaders = [
+    'رقم الهاتف الموحد', 'إجمالي مرات التسجيل في قاعدة البيانات', 'مرات الظهور داخل التقرير',
+    'مرات خارج نطاق التقرير', 'أول تسجيل', 'أحدث تسجيل', 'أسماء العملاء داخل التقرير',
+    'الفروع داخل التقرير', ...(superAdminExport ? ['البراندات داخل التقرير'] : []), 'المنتجات',
+  ];
+  makeExcelReportSheet(XLSX, {
+    title: 'ملخص أرقام الهواتف المتكررة',
+    subtitle: `أرقام موحدة ظهرت أكثر من مرة | ${duplicateGroups.length} رقمًا متكررًا | التكرار محسوب من كامل بيانات الحساب المصرح له، وليس من نطاق التاريخ فقط`,
+    headers: summaryHeaders,
+    rows: summaryRows,
+    widths: [22, 22, 20, 18, 22, 22, 38, 34, ...(superAdminExport ? [34] : []), 34],
+    dateColumns: [4, 5],
+    usedNames: appendContext,
+    sheetName: 'ملخص التكرار',
+  });
+
+  const detailHeaders = [
+    'رقم الهاتف الموحد', 'إجمالي مرات التسجيل', 'ترتيب هذا التسجيل زمنيًا',
+    'الاسم', ...(superAdminExport ? ['البراند'] : []), 'الفرع', 'المنتج',
+    'مصدر التسجيل', 'موافقة العميل', 'تاريخ التسجيل', 'رقم الهاتف كما أدخله العميل',
+  ];
+  const detailRows = duplicateRows.map((customer) => {
+    const info = phoneAnalysis.byCustomerId.get(customer.id);
+    return [
+      excelSafeText(info.phone), info.count, info.position,
+      excelSafeText(customer.name), ...(superAdminExport ? [excelSafeText(customer.brandName || '—')] : []),
+      excelSafeText(customer.branchName || '—'), excelSafeText(customer.purchase || customer.product),
+      customer.source === 'nfc' ? 'NFC' : 'QR', customer.consent === true ? 'موافق' : 'غير مسجل',
+      excelDate(customer.createdAt), excelSafeText(customer.phone),
+    ];
+  });
+  if (!detailRows.length) detailRows.push(['لا توجد سجلات لعملاء بأرقام متكررة ضمن نطاق التقرير.', '', '', '', ...(superAdminExport ? [''] : []), '', '', '', '', '', '']);
+  makeExcelReportSheet(XLSX, {
+    title: 'سجلات العملاء أصحاب أرقام الهواتف المتكررة',
+    subtitle: `كل صف يمثل تسجيلًا واحدًا لرقم متكرر | عدد السجلات المعروضة: ${duplicateRows.length} | عدد مرات التكرار الإجمالي يظهر حتى عند تقييد التقرير بالتاريخ`,
+    headers: detailHeaders,
+    rows: detailRows,
+    widths: [22, 20, 22, 28, ...(superAdminExport ? [28] : []), 25, 28, 16, 18, 23, 24],
+    dateColumns: [superAdminExport ? 9 : 8],
+    usedNames: appendContext,
+    sheetName: 'العملاء المتكررون',
+  });
+}
+
 $('#exportBtn').onclick = async () => {
   const button = $('#exportBtn');
   setButtonBusy(button, true, 'جارٍ تجهيز Excel...');
@@ -1392,7 +1624,9 @@ $('#exportBtn').onclick = async () => {
     const dateFrom = parseDateInput($('#customerDateFrom')?.value || '');
     const dateTo = parseDateInput($('#customerDateTo')?.value || '');
     const dateToExclusive = dateTo ? new Date(dateTo.getFullYear(), dateTo.getMonth(), dateTo.getDate() + 1).getTime() : null;
-    const exportRows = (superAdminExport ? all.slice() : all.filter((customer) => customer.brandId === ownBrandId))
+    const exportScopeRows = superAdminExport ? all.slice() : all.filter((customer) => customer.brandId === ownBrandId);
+    const exportPhoneAnalysis = buildCustomerPhoneAnalysis(exportScopeRows);
+    const exportRows = exportScopeRows
       .filter((customer) => (!dateFrom || customerDateMillis(customer.createdAt) >= dateFrom.getTime()) &&
         (!dateToExclusive || customerDateMillis(customer.createdAt) < dateToExclusive));
 
@@ -1423,8 +1657,8 @@ $('#exportBtn').onclick = async () => {
     };
 
     const usedSheetNames = new Set(superAdminExport
-      ? ['ملخص التقرير', 'ملخص الفروع', 'ملخص البراندات']
-      : ['بيانات البراند', 'حقول التسجيل', 'ملخص الفروع']);
+      ? ['ملخص التقرير', 'ملخص الفروع', 'ملخص البراندات', 'ملخص التكرار', 'العملاء المتكررون']
+      : ['بيانات البراند', 'حقول التسجيل', 'ملخص الفروع', 'ملخص التكرار', 'العملاء المتكررون']);
     const appendContext = { workbook };
     let totalExported = 0;
 
@@ -1439,7 +1673,10 @@ $('#exportBtn').onclick = async () => {
         ['إجمالي الفروع', exportBranches.length],
         ['الفروع النشطة', totalActiveBranches],
         ['الفروع المتوقفة', exportBranches.length - totalActiveBranches],
-        ['إجمالي العملاء', exportRows.length],
+        ['إجمالي العملاء ضمن نطاق التقرير', exportRows.length],
+        ['أرقام الهواتف المتكررة في قاعدة البيانات', [...exportPhoneAnalysis.groups.values()].filter((group) => group.count > 1).length],
+        ['سجلات مرتبطة بأرقام متكررة', [...exportPhoneAnalysis.byCustomerId.values()].filter((info) => info.count > 1).length],
+        ['أرقام ظهرت مرة واحدة', [...exportPhoneAnalysis.byCustomerId.values()].filter((info) => info.count === 1).length],
       ];
       makeExcelReportSheet(XLSX, {
         title: 'Archai | التقرير الإداري الشامل',
@@ -1514,6 +1751,7 @@ $('#exportBtn').onclick = async () => {
         brand: ownBrand,
         brandBranches,
         brandCustomers,
+        phoneAnalysis: exportPhoneAnalysis,
         appendContext,
       });
 
@@ -1541,13 +1779,20 @@ $('#exportBtn').onclick = async () => {
       });
     }
 
+    buildPhoneDuplicateExcelSheets(XLSX, {
+      exportRows,
+      phoneAnalysis: exportPhoneAnalysis,
+      superAdminExport,
+      appendContext,
+    });
+
     for (const branch of exportBranches) {
       const brand = exportBrands.find((item) => item.id === branch.brandId);
       const branchRows = exportRows
         .filter((customer) => customer.brandId === branch.brandId && customer.branchId === branch.id)
         .sort((a, b) => customerDateMillis(b.createdAt) - customerDateMillis(a.createdAt));
       totalExported += branchRows.length;
-      buildBranchCustomerSheet(XLSX, { branch, brand, branchRows, usedSheetNames, appendContext });
+      buildBranchCustomerSheet(XLSX, { branch, brand, branchRows, phoneAnalysis: exportPhoneAnalysis, usedSheetNames, appendContext });
     }
 
     const datePart = reportDate.toISOString().slice(0, 10);
